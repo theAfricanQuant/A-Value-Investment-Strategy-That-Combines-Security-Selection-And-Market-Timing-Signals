@@ -197,25 +197,24 @@ def make_pipeline():
     market = Fundamentals.market_cap.latest/ Fundamentals.shares_outstanding.latest
     book_to_market = book/ market
     p_universe = book_to_market >= 1
-    
+
     # CustomFactor of Piotroski F-Score
     f_score = Piotroski()
-    
+
     # Filtering top and bottom 25 stocks
     longs  = f_score.eq(9) or f_score.eq(8) #f_score.top(25, mask=base_universe)
     shorts = f_score.eq(0)                  #f_score.bottom(25, mask=base_universe)
-    
+
     universe = base_universe & p_universe & ( longs| shorts)
 
-    pipe = Pipeline(
+    return Pipeline(
         columns={
             'longs': longs,
             'shorts': shorts,
             'f_score': f_score,
         },
-        screen=universe
+        screen=universe,
     )
-    return pipe
 
 
 def before_trading_start(context, data):
@@ -225,17 +224,17 @@ def before_trading_start(context, data):
     try:
         # generates output
         context.output = algo.pipeline_output('piotroski')
-        
+
         # loads risk factors
         context.risk_loadings = algo.pipeline_output('risk_factors')
-        
+
         # records position
         record(cash=context.portfolio.cash, asset=context.portfolio.portfolio_value, ) 
 
         # These are the securities that we are interested in trading each day.
         context.security_list = context.output.index.tolist()
     except Exception as e:
-        print(str(e))
+        print(e)
 
 
 def rebalance(context, data):
@@ -244,44 +243,44 @@ def rebalance(context, data):
     """
     #: Obtaining Prices
     # prices = data.history(context.security_list, 'price', 252, '1d')
-    
+
     #: Compute for portfolio weights
     long_secs = context.output[context.output['longs']].index
     long_weight = (1.0/ max(len(long_secs), 1))
-    
+
     short_secs = context.output[context.output['shorts']].index
     short_weight = 0 #(0.0/ max(len(short_secs), 1))
-    
+
     # Open our long position.
     for security in long_secs:
         try:
             RSI_daily = factors.RSI(inputs = [USEquityPricing.close], window_length = 14)
-            
+
             MFI_Daily = MFI()
-            
+
             # Defining ADX
             period = 30
             H = data.history(security,'high', 2*period,'1d') #data.history should be changed right?
             L = data.history(security,'low', 2*period,'1d')
             C = data.history(security,'price', 2*period,'1d')
-            ta_ADX = talib.ADX(H, L, C, period)  
-            ta_nDI = talib.MINUS_DI(H, L, C, period)  
-            ta_pDI = talib.PLUS_DI(H, L, C, period)  
+            ta_ADX = talib.ADX(H, L, C, period)
+            ta_nDI = talib.MINUS_DI(H, L, C, period)
+            ta_pDI = talib.PLUS_DI(H, L, C, period)
             ADX = ta_ADX[-1]
             nDI = ta_nDI[-1]
             pDI = ta_pDI[-1]
 
             # defining Long and short positions position criteria
             if data.can_trade(security) and (RSI_daily < 30) and (MFI_Daily < 20) or ((ADX > 20) & (pDI > nDI)):
-                log.info("Going long on stock %s"%(security.symbol))
+                log.info(f"Going long on stock {security.symbol}")
                 order_target_percent(security, long_weight)
-            
+
             if data.can_trade(security) and (RSI_daily > 70) and (MFI_Daily > 80) or ((ADX > 25) & (pDI < nDI)):
-                log.info("Going short on stock %s"%(security.symbol))
+                log.info(f"Going short on stock {security.symbol}")
                 order_target_percent(security, 0)
         except:
             pass
-   
+
     # Closing the position
     for security in context.portfolio.positions:
         if data.can_trade(security) and security not in long_secs and security not in short_secs:
@@ -316,4 +315,4 @@ def handle_data(context, data):
         price_position = context.portfolio.positions[security].cost_basis
         if (position > 0) and (current_price < price_position * 0.9):
             order_target_percent(security, 0, style=LimitOrder(current_price))
-            log.info('Sell with stop loss hit' + str(security.symbol))
+            log.info(f'Sell with stop loss hit{str(security.symbol)}')
